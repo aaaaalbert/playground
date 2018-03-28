@@ -1,0 +1,21 @@
+"""A basic set of interactive tests for unicode_scrubber.r2py"""
+unicode_scrubber = dy_import_module("unicode_scrubber.r2py")
+
+# Test a few basic types
+examples = [1, "abc", 5.9, True, None]
+
+# Test a list containing basic types too
+examples.append(examples[:])
+
+# Test actual Unicode-containing dicts
+examples.append(json_parse('{"a": 1}'))
+examples.append(json_parse('{"b": "xyz"}'))
+examples.append(json_parse('{"c": 123.456, "d": {"e": false}}'))
+examples.append(json_parse('''{"network": {"bearing": 0, "altitude": 0, "time": 1430336849011, "longitude": -123.24876070000001, "provider": "network", "latitude": 49.261202699999998, "speed": 0, "accuracy": 25.507999420166016}}'''))
+examples.append(json_parse('{"my list": [1,2,3,"abc",0.5,true]}'))
+
+log("BEFORE:", examples, "\nAFTER: ")
+
+for example in examples:
+  log(unicode_scrubber.scrub(example), "\n")
+

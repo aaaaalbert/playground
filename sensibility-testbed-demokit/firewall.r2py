@@ -1,0 +1,125 @@
+"""
+firewall.r2py --- act as a network firewall and keep the RepyV2 sandbox
+  from contacting specific (ranges of) IP addresses.
+
+(We should also block resolving certain top-level domains such as ".lan"
+that OpenWrt uses for machines on the LAN. And then, we'd need to be
+able to block certain destination ports as well. And we should filter
+on transport protocols: "10--8--UDP" or some such.)
+
+Usage:
+
+python repy.py restrictionsfile encasementlib.r2py \
+  firewall.r2py IP1--SUBNET1 IP2--SUBNET2 ... your_program.r2py
+
+To specify a subnet to be filtered, put its IP address, followed
+by two dashes (that replace the slash in the usual CIDR notation),
+followed by the length of the subnet mask in bits.
+
+Most often, you will want to shut off the following address ranges.
+This keeps the RepyV2 sandbox from, e.g., trying to log into your home
+gateway router, probe your networked printer and disk shares, etc.:
+* 10/8, 172.16/12, 192.168/16 (aka RFC1918),
+* 224/28 (RFC1122 multicast), and
+* 100.64/10 (RFC6598 shared address space for carrier-grade NAT).
+
+Using the required syntax:
+  10--8 172.16--12 192.168--16 224---28 100.64--10
+
+The parser is flexible enough to understand "10.0.0.0--8" and similar.
+(Note that the subnet mask length overrides the IP.) Also, you can drop
+the "--32" suffix for single hosts.
+"""
+
+firewalled_subnets = []
+
+def ip_to_bytes(ip_address):
+  ip_string_parts = ip_address.split(".")
+  # Pad to four parts
+  while len(ip_string_parts) < 4:
+    ip_string_parts.append("0")
+  ip_as_bytes = 0
+  for part in ip_string_parts:
+    part_as_int = int(part)
+    if 0 <= part_as_int <= 255:
+      ip_as_bytes = (ip_as_bytes<<8) + part_as_int
+    else:
+      raise ValueError("Part of this IP address is <0 or >255")
+  return ip_as_bytes 
+
+
+
+class Subnet():
+  def __init__(self, ip_prefix, subnet_bits=32):
+    self.subnet_bits = subnet_bits
+    self.subnet_mask = 2**subnet_bits - 1
+    self.subnet_mask <<= 32-subnet_bits
+    self.ip_prefix = ip_to_bytes(ip_prefix) & self.subnet_mask
+  def contains(self, ip_address):
+    # Does this subnet contain the ip_address?
+    ip_bytes = ip_to_bytes(ip_address)
+    their_prefix = ip_bytes & self.subnet_mask
+    return their_prefix == self.ip_prefix
+
+
+
+# Initialize the list of firewalled subnets. Assume that IP addresses
+# without a subnet specification are meant as single hosts.
+for subnet in callargs:
+  try:
+    ip_prefix, subnet_bits = subnet.split("--")
+  except ValueError:
+    ip_prefix, subnet_bits = subnet, 32
+  firewalled_subnets.append(Subnet(ip_prefix, subnet_bits))
+
+
+
+def firewalled_sendmessage(destip, destport, message, localip, localport):
+  # If the destination IP is in the blacklist, silently drop the
+  # message. (The caller can still query getresources and see that
+  # nothing was really sent.)
+  for subnet in firewalled_subnets:
+    if subnet.contains(destip):
+      return len(message)
+  else:
+    # We didn't return yet, so the destination isn't firewalled.
+    # Send on the message just normal.
+    return sendmessage(destip, destport, message, localip, localport)
+
+
+def firewalled_openconnection(destip, destport, localip, localport, timeout):
+  # If the destination IP is in the blacklist, pretend they are
+  # actively declining our connection attempt.
+  # (The caller can still query getresources and see that
+  # nothing was really sent.)
+  for subnet in firewalled_subnets:
+    if subnet.contains(destip):
+      raise ConnectionRefusedError("The connection was refused!")
+  else:
+    # We didn't raise yet, so the destination isn't firewalled.
+    # Proceed with connecting as normal.
+    return openconnection(destip, destport, localip, localport, timeout)
+
+
+
+# Define shorthands for the various entries in the child context definition
+TYPE = "type"
+ARGS = "args"
+ANY = "any"
+RETURN = "return"
+EXCP = "exceptions"
+TARGET = "target"
+FUNC = "func"
+OBJC = "objc"
+
+CHILD_CONTEXT_DEF["sendmessage"] = {
+  TYPE: FUNC, ARGS: ANY, RETURN: ANY, EXCP: ANY, TARGET: firewalled_sendmessage
+}
+
+CHILD_CONTEXT_DEF["openconnection"] = {
+  TYPE: FUNC, ARGS: ANY, RETURN: ANY, EXCP: ANY, TARGET: firewalled_openconnection
+}
+
+# Dispatch this module, let the next (if any) run
+secure_dispatch_module()
+

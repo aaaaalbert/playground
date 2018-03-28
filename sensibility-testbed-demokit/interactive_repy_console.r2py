@@ -1,0 +1,301 @@
+"""
+interactive_repy_console.r2py --- as the name says!
+
+Interactive Repy Console is meant to be uploaded to a Seattle VM and 
+run there. It will listen on a TCP port for an incoming connection 
+from your Telnet client, netcat, or similar, and then provide a 
+RepyV2 Read-Evaluate-Print Loop (REPL). 
+This eases experimentation, as it shortcuts `seash` for the most part: 
+You can work interactively, see the VM log as it is written to, get 
+immediate feedback if there are any errors in your code, etc. 
+All of Repy will work as expected; you might upload and then import 
+libraries as well; calling the `help()` function will list a few 
+other things it provides.
+
+(Note: There is a Python version of Interactive Repy Console too. 
+You would run that on your local machine.)
+
+Usage:
+In seash,
+user@group !> start dylink.r2py interactive_repy_console.r2py LISTENPORT
+
+   or
+user@group !> start dylink.r2py interactive_repy_console.r2py
+
+Using the first form, Interactive Repy Console will try to bind to 
+LISTENPORT and use it to receive incoming connections. Using the 
+second form, it will choose a port automatically.
+Either way, the port is logged in the VM log so you know how to 
+contact it.
+
+You would then go and upload your own code using seash, and start it 
+inside Interactive Repy Console to see if it performs as expected. 
+When in doubt, call the help() function on the prompt.
+"""
+
+# The prompt prefixes, cf. Python's `sys.ps1` and `sys.ps2`
+PS1 = ">>> "
+PS2 = "... "
+
+
+
+# Here we store input and output from/to the user's 
+# network session (and the VM log).
+stdin = []
+stdout = []
+
+
+
+# Stash a few RepyV2 API calls that we will override
+_exitall = exitall
+_log = log
+
+def exitall():
+  log("NOTE: exitall is not available. See help().")
+
+def log(*args):
+  """Print the given arguments to the VM log. 
+  XXX In a later implementation, send them to the Telnet client too."""
+  string_to_print = ""
+  for arg in args:
+    string_to_print += str(arg) + " "
+
+  # Drop the last space which would potentially be printed after a 
+  # user-supplied "\n" and thus indent the next line
+  string_to_print = string_to_print[:-1]
+
+  # Append stuff to the "stdout" which will be sent to the user client
+  stdout.append(string_to_print)
+
+  # Print to the VM log too
+  _log(string_to_print)
+
+
+
+def quit(message="Quitting Interactive Repy Console (and any threads that "
+        "might be running still).\n"):
+  if message:
+    log(message)
+  _exitall()
+
+
+
+def help():
+  """List and explain the handy functions we implement."""
+  log("""In addition to the RepyV2 API and all library calls you imported, 
+you may call these builtin functions during your session:
+
+help()      -- displays this text
+cat(file)   -- prints the contents of file to the screen (and the VM log)
+module = dy_import_module(modulefilename)
+            -- use this instead of Python's `import modulename as module`
+dy_import_module_symbols(modulefilename)
+            -- use this instead of Python's `from modulename import *`
+quit(message=...)
+            -- quits Interactive Repy Console and prints an overrideable message
+start(file) -- imports file and calls into `if callfunc=="initialize": ...`,
+               as seash's `start` command would do
+
+Note: Interactive Repy Console overrides the following Repy functions:
+exitall()   -- will not perform any function
+log(*args)  -- will both print to the VM log and this network connection
+
+You can always get the original functions back, they are stored as
+`_log` and `_exitall`. However, note that `_log` only writes to the
+VM log, not to this network connection, and `_exitall` exit every
+thread in this session, including Interactive Repy Console's!
+
+In case anything goes wrong because your code hangs etc., just use seash 
+to stop and then restart the VM.
+
+CAVEAT -- This program is incomplete and fragile!
+* The console doesn't fully parse your input. When in doubt, press
+  enter twice.
+* The console will evaluate statments like "25+7", but not print
+  the results. Use `log(25+7)` instead.
+* Using variable and function names that don't exist currently
+  crashes the console. See SeattleTestbed/repy_v2#132 for background.
+
+""")
+
+
+def cat(filename):
+  """`cat` (i.e. display the contents of) a file.
+  Do this in chunks so as to not cache the whole file before printing."""
+  CHUNKSIZE = 1000
+  filehandle = openfile(filename, False)
+  seek_pointer = 0
+  while True:
+    try:
+      chunk = filehandle.readat(CHUNKSIZE, seek_pointer)
+      if chunk == "":
+        break
+      stdout.append(chunk)
+      seek_pointer += len(chunk)
+    except SeekPastEndOfFileError:
+      filehandle.close()
+
+
+
+def start(filename):
+  """Read the contents of a file, and execute them as if `start`ed
+  in seash. If the file defines functions etc., these will become
+  available in the global namespace. (For finer-grained imports,
+  run the console under `dylink`.)
+  """
+  filehandle = openfile(filename, False)
+  code = filehandle.readat(None, 0)
+  filehandle.close()
+  namespace = createvirtualnamespace(code, filename)
+  namespace.evaluate(_context)
+
+
+
+def create_server(remote_ip, remote_port, user_connection):
+  """This will return an argument-less function for `createthread`. 
+  The arguments referring to the client's network connection will 
+  be available to the function we return via a closure."""
+
+  def server():
+    """The server function handling a client. This creates separate 
+    threads for sending output we generate, receiving user input, and 
+    evaluating the input (probably to generate further output)."""
+    _log("Incoming client on", remote_ip, "port", remote_port, "\n")
+    # Redirect the log function to the user session
+    stdout = ["""Welcome to the Interactive RepyV2 Console!
+Type `help()` for help.""" + "\n" + PS1]
+    stdin = []
+
+    def server_log(*args):
+      for arg in args:
+        stdout.append(str(arg) + " ")
+
+    def handle_user_output():
+      """If there is anything in the `stdout` list (because the user or 
+      their code called our overridden `log` function), send the full line 
+      to the user."""
+      while True:
+        try:
+          this_line = stdout.pop(0)
+        except IndexError:
+          sleep(0.1)
+          continue
+        while len(this_line) > 0:
+          try:
+            amount_sent = user_connection.send(this_line)
+            this_line = this_line[amount_sent:]
+          except SocketWouldBlockError:
+            sleep(0.1)
+          except SocketClosedRemote:
+            return
+
+    createthread(handle_user_output)
+
+    def handle_user_input():
+      """Receive input from the socket; split on newline characters 
+      to form full input lines to be evaluated, keep receiving if 
+      a line is not complete yet."""
+      received_input = ""
+      prompt_prefix = PS1
+      while True:
+        try:
+          received_input += user_connection.recv(100)
+        except SocketWouldBlockError:
+          sleep(0.1)
+        except SocketClosedRemote:
+          return
+        if "\n" in received_input:
+          lines = received_input.split("\n")
+          stdin.extend(lines[:-1])
+          received_input = lines[-1]
+          for line in lines[:-1]:
+            if line == "":
+              # Only unindent after a single empty line
+              prompt_prefix = PS1
+            elif prompt_prefix == PS1:
+              # XXX No proper single-line detection, always assume indent!
+              prompt_prefix = PS2
+            stdout.append(prompt_prefix * (len(lines)-1))
+
+    createthread(handle_user_input)
+
+    def evaluate_user_input():
+      """A currently very hacky eval-like function. Doesn't do natural 
+      line continuation, multiline statements, triple-quoted strings, or 
+      anything, yet.
+      Doesn't print results of statements either.
+      Reads lines from stdin, momentarily stops reading when seeing
+      an empty line which it considers an end-of-block marker, then
+      tries to evaluate the block of lines in a virtual namespace,
+      repeats forever."""
+      while True:
+        # Queue up lines making up a code block here
+        code_queue = []
+        while True:
+          try:
+            statement = stdin.pop(0)
+            if statement == "":
+              break
+            else:
+              code_queue.append(statement)
+          except IndexError:
+            sleep(0.1)
+
+        try:
+          vn = createvirtualnamespace("\n".join(code_queue), "TheEvalLoop")
+          _context["log"] = server_log
+          vn.evaluate(_context)
+        except Exception, e:
+          stdout.append(getlasterror() + "\n")
+
+    createthread(evaluate_user_input)
+
+  return server
+
+
+
+if callfunc == "initialize":
+  # Initialize the listening socket, respecting the optional callarg.
+  try:
+    listen_port_list = [int(callargs[0])]
+  except ValueError:
+    # An arg was given, but it is not parseable as int.
+    quit("""Usage: interactive_repy_console.r2py [LISTEN_PORT]
+where LISTEN_PORT is an optional port I should listen on. When omitted, 
+an available TCP port is chosen automatically, and announced in the VM log.
+""")
+  except IndexError:
+    # No port arg was given. Let's try all of the available ones then.
+    listen_port_list = getresources()[0]["connport"]
+
+  for listen_port in listen_port_list:
+    try:
+      listen_socket = listenforconnection(getmyip(), listen_port)
+      log("Listening on", getmyip(), "port", listen_port, "\n")
+      break
+    except (AlreadyListeningError, DuplicateTupleError, 
+        RepyArgumentError, AddressBindingError):
+      # These are all indicative that we can't listen here. Keep trying!
+      pass
+    except ResourceForbiddenError:
+      log("I cannot use port", listen_port, "for listening. Are you sure "
+          "my resource restrictions allow it?\n")
+  else:
+    # If we end up here, none of the ports worked. Quit!
+    quit("Sorry, none of the ports I tried would work. I'm giving up.\n")
+
+  # Down here, all is well. We have a listening socket for the user.
+  # Let's see when they connect in.
+  while True:
+    try:
+      (remote_ip, remote_port, user_connection) = listen_socket.getconnection()
+      server = create_server(remote_ip, remote_port, user_connection)
+      createthread(server)
+    except SocketWouldBlockError:
+      # No incoming connection this time. Check again later.
+      sleep(0.1)
+    except:
+      # We can't do anything sensible with other errors. Let's 
+      # have Repy print a stacktrace.
+      raise
+

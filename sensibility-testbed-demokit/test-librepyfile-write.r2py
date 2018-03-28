@@ -1,0 +1,30 @@
+"""
+Call me like `dylink.r2py THISFILE.r2py`, and don't forget to upload 
+dylink and librepyfile to the vessel you're running on.
+
+Run me multiple times to see that I actually append to the end of the file.
+"""
+librepyfile = dy_import_module("librepyfile.r2py")
+
+# Uhm... erm... open the file!?
+logfile = librepyfile.open("mylogfile.txt")
+
+# Seek to the end so that we can append stuff
+logfile.seek(logfile.size())
+
+logfile.write("This is this: ")
+
+for i in range(200, 1000, 10):
+  # Convert to string before writing, this isn't ol' comfortable `log`!
+  logfile.write(str(i) + ", ")
+
+logfile.write("Now that was that.\n")
+
+# Flush every now and then, or you will see partial data on 4096 byte 
+# boundaries, see librepyfile's BLOCK_CACHE magic.
+logfile.flush()
+
+# It's always a good idea (though not strictly necessary) to close 
+# a file after using it.
+logfile.close()
+

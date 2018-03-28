@@ -1,0 +1,24 @@
+# These are dependencies of the nodemanager itself (which uses the 
+# RepyV2 runtime)
+./*
+DEPENDENCIES/seattlelib_v2/*
+DEPENDENCIES/repy_v2/*
+DEPENDENCIES/portability/*
+DEPENDENCIES/affix/*
+DEPENDENCIES/affix/components/*
+DEPENDENCIES/common/*
+
+# These are for the `repyV2` sandbox directory, inside of which the 
+# nodemanager will run scripts that have been uploaded to vessels.
+DEPENDENCIES/repy_v2/* repyV2
+./servicelogger.py repyV2
+DEPENDENCIES/portability/* repyV2
+DEPENDENCIES/seattlelib_v2/* repyV2
+DEPENDENCIES/seash/* repyV2
+DEPENDENCIES/affix/* repyV2
+DEPENDENCIES/affix/components/* repyV2
+
+
+# Tests
+test DEPENDENCIES/utf/*
+test tests/*

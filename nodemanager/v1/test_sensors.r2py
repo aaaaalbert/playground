@@ -1,0 +1,88 @@
+"""
+test_sensors.r2py --- try out every sensor call Sensibility Testbed supports.
+
+This program
+* loops over the huge `sensor_calls_and_args` list below,
+* calls every named sensor using example arguments (as required for
+  the call), and
+* logs
+  - the return value of the call, or
+  - any exception that is raised.
+
+Implementation note:
+We map function names to functions using Repy's `_context` dict. Under
+normal circumstances, you would call the desired sensor function directly
+by its name, e.g.
+
+  t, ax, ay, az = get_acceleration()
+
+"""
+
+# List of sensor calls and exemplary call arguments, formatted as
+# ( SENSOR_NAME, ( SENSOR_ARGUMENTS ) )
+sensor_calls_and_args = [
+    ("get_bluetooth_info", ()),
+    ("get_bluetooth_scan_info", ()),
+    ("is_wifi_enabled", ()),
+    ("get_wifi_state", ()),
+    ("get_wifi_connection_info", ()),
+    ("get_wifi_scan_info", ()),
+    ("get_network_info", ()),
+    ("get_cellular_provider_info", ()),
+    ("get_cell_info", ()),
+    ("get_sim_info", ()),
+    ("get_phone_info", ()),
+    ("get_mode_settings", ()),
+    ("get_display_info", ()),
+    ("get_volume_info", ()),
+    ("get_battery_info", ()),
+    ("get_sensor_list", ()),
+    ("get_acceleration", ()),
+    ("get_ambient_temperature", ()),
+    ("get_game_rotation_vector", ()),
+    ("get_geomagnetic_rotation_vector", ()),
+    ("get_gravity", ()),
+    ("get_gyroscope", ()),
+    ("get_gyroscope_uncalibrated", ()),
+    ("get_heart_rate", ()),
+    ("get_light", ()),
+    ("get_linear_acceleration", ()),
+    ("get_magnetic_field", ()),
+    ("get_magnetic_field_uncalibrated", ()),
+    ("get_pressure", ()),
+    ("get_proximity", ()),
+    ("get_relative_humidity", ()),
+    ("get_rotation_vector", ()),
+    ("get_step_counter", ()),
+    ("is_media_playing", ()),
+    ("is_tts_speaking", ()),
+    # The notation ("...",) makes a 1-element tuple out of the enclosed string
+    ("tts_speak", ("Normally, you cannot make the phone speak."
+        "We only enable the text-to-speech interface at demo time!",)),
+    ("get_location", ()),
+    ("get_lastknown_location", ()),
+    ("get_geolocation", (48.03, 16.49, 10)),
+]
+
+# Add sensor names to skip here:
+skip_list = []
+
+# Main loop --- try all sensor function calls
+for sensor_name, sensor_args in sensor_calls_and_args:
+  # Skip unwanted sensors (if any)
+  if sensor_name in skip_list:
+    continue
+
+  # Get the actual sensor function from `_context`
+  sensor_function = _context[sensor_name]
+
+  # Log the current timestamp and loop iteration parameters
+  log(getruntime(), sensor_name, sensor_args)
+
+  # Now call down and log the result (or exception)
+  try:
+    return_value = sensor_function(*sensor_args)
+    log(return_value, "\n")
+  except Exception, e:
+    log("FAILED with exception", repr(e), "\n")
+

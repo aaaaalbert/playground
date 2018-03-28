@@ -1,0 +1,9 @@
+"""
+"""
+
+sockobj = openconnection(getmyip(), 63100, getmyip(), 63111, 10)
+
+sockobj.send("Good evening, this is " + getmyip() + " speaking!\n")
+
+sockobj.close()
+

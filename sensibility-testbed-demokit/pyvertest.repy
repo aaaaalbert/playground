@@ -1,0 +1,96 @@
+"""
+pyvertest.repy -- Find platform info on Seattle vessels through Repy.
+
+This is based on small Write Once, Run Anywhere (``WORA'') violations 
+due to the exact Python version Seattle runs on.
+
+Py2.[56] WORA headaches...
+http://docs.python.org/2/whatsnew/2.6.html#pep-3101-advanced-string-formatting
+  ("".format())
+http://docs.python.org/2/whatsnew/2.6.html#pep-3110-exception-handling-changes
+  (except FooException as something_else:)
+http://docs.python.org/2/whatsnew/2.6.html#pep-3112-byte-literals
+  (bytes as new data type)
+http://docs.python.org/2/whatsnew/2.6.html#pep-3127-integer-literal-support-and-syntax
+  (0o1234 as a new way of specifying octal numbers)
+
+
+Py2.[67] WORA headaches...
+http://docs.python.org/2/whatsnew/2.7.html#pep-378-format-specifier-for-thousands-separator
+rhea:seattle_repy albert$ python2.5
+>>> '{:20,d}'.format(18446744073709551616)
+Traceback (most recent call last):
+  File "<stdin>", line 1, in <module>
+AttributeError: 'str' object has no attribute 'format'
+>>> ^D
+
+rhea:seattle_repy albert$ python2.6
+>>> '{:20,d}'.format(18446744073709551616)
+Traceback (most recent call last):
+  File "<stdin>", line 1, in <module>
+ValueError: zero length field name in format
+>>> ^D
+
+rhea:seattle_repy albert$ python2.7
+>>> '{:20,d}'.format(18446744073709551616)
+'18,446,744,073,709,551,616'
+>>> 
+
+"""
+
+
+def pretending_callback(*args):
+  sleep(10)
+
+
+
+if callfunc=="initialize":
+  logstring = getmyip() + " runs "
+
+  # Python version test, see #1121 and #1127 (problem descriptions), and
+  # http://docs.python.org/2/whatsnew/2.7.html#pep-378-format-specifier-for-thousands-separator
+  # (inspiration for the detection)
+  try:
+    '{:20,d}'.format(18446744073709551616)
+    logstring += "Python 2.7 "
+  except AttributeError:
+    logstring += "Python 2.5 "
+  except ValueError:
+    logstring += "Python 2.6 "
+
+
+  # OS test, inspired by some semi-related discussion with Akos Lukovics
+  sockethandle = waitforconn("localhost", 63107, pretending_callback)
+  for i in range(0,2):
+    try:
+      openconn("localhost", 63107, "localhost", 63107)
+    except Exception, e:
+      (exception_number, exception_string) = e.args
+      os_from_errno = {10048: 'Windows', 98: 'Linux', 48: 'MacOSX'}
+      logstring += "on " + os_from_errno[exception_number] + " "
+      break
+
+
+
+  # File system test, see #1149
+  file = open("CaseSensitive", mode="w")
+  file.write("Let's write a few bytes...")
+  file.flush()
+  file.close()
+
+  try:
+    removefile("cASEsENSITIVE")
+    logstring += "on a non-case preserving file system.\n"
+  except Exception, e:
+    logstring += "on a case preserving file system.\n"
+
+
+
+  # Log the test results
+  print logstring
+  file = open("log.txt", mode="w")
+  file.write(logstring)
+  file.flush()
+  file.close()
+
+  exitall()

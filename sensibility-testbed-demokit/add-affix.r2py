@@ -1,0 +1,14 @@
+myname = "bazbarfoo-allerlei---2"
+
+affix_stack = dy_import_module("affix_stack.r2py")
+affix_obj = affix_stack.AffixStack('(CoordinationAffix)(MakeMeHearAffix)(NamingAndResolverAffix,' + myname + ')')
+
+CHILD_CONTEXT['listenforconnection'] = affix_obj.listenforconnection
+CHILD_CONTEXT['openconnection'] = affix_obj.openconnection
+CHILD_CONTEXT['getmyip'] = affix_obj.getmyip
+CHILD_CONTEXT['gethostbyname'] = affix_obj.gethostbyname
+
+log('Name wrapper inited, name is', myname, '\n')
+
+dy_dispatch_module()
+

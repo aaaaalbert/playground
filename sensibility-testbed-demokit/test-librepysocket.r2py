@@ -1,0 +1,19 @@
+"""
+This script implements a very simple TCP server using librepysocket.
+
+Use say-hello.r2py (or telnet, or netcat, or ...) to say hello to the server!
+"""
+librepysocket = dy_import_module("librepysocket.r2py")
+
+def thecallback(remote_ip, remote_port, sockobj, thiscommhandle, listencommhandle):
+  sockobj.send("Hello," + remote_ip + "\n")
+  while True:
+    try:
+      log(sockobj.recv(1000))
+    except SocketWouldBlockError:
+      sleep(0.1)
+    except SocketClosedRemote:
+      break
+
+stopfun = librepysocket.waitforconn(getmyip(), 63100, thecallback)
+

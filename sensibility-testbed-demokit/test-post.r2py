@@ -1,0 +1,11 @@
+httpretrieve = dy_import_module("httpretrieve.r2py")
+urllib = dy_import_module("urllib.r2py")
+
+url = callargs[0]
+stuff_to_post = urllib.urllib_quote_parameters({"postable material": str(callargs[1:])})
+
+log("Opening url '" + url + "' to post '" + str(stuff_to_post) + "' there...\n")
+s = httpretrieve.httpretrieve_open(url, postdata=stuff_to_post)
+log("Done\n")
+s.close()
+

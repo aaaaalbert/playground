@@ -1,0 +1,28 @@
+usage = """
+curllike.r2py -- Retrieve and print out the contents stored at a URL.
+
+Usage:
+  python repy.py restrictionsfile dylink.r2py curllike.r2py URL
+
+where URL is the Uniform Resource Locator you are interested in.
+This must include the scheme (``http''), literal ``://'', the domain, 
+an optional ``:'' followed by the TCP port number to use, and the 
+resource path (at least ``/''), and optionally ``#'' plus fragment 
+identifier.
+
+Note: Due to restrictions in the underlying httpretrieve.r2py library, 
+query strings (``?something'') are not supported at the moment.
+
+"""
+
+if len(callargs) != 1:
+  log("Wrong number of arguments!\n\n")
+  log(usage)
+  exitall()
+
+httpretrieve = dy_import_module("httpretrieve.r2py")
+
+log("Retrieving from", callargs[0], "...\n")
+
+log(httpretrieve.httpretrieve_open(callargs[0]).read(), "\n")
+

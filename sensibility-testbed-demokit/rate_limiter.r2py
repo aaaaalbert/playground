@@ -1,0 +1,76 @@
+"""
+This is a proof-of-concept rate limiting security layer for the
+Sensibility Testbed `get_location` sensor API call. It's thread-safe,
+and actually works.
+"""
+# Pause for at least this many seconds between calls
+PAUSE = 2
+
+# Prevent TOCTTOU races between threads. If not for this lock,
+# different threads might conclude that their respective allowed
+# point in time for calling the function has come, side-stepping
+# the overall rate limit.
+lock = createlock()
+
+# Store the next allowed call time in a list for the reference
+# closure magic to work.  (Putting it in an int/float variable
+# makes it an unbound local when we call into the rate limited
+# function from user code.)
+# Initialize so that the first call already pauses, otherwise
+# starting and stopping and restarting the sandbox might bypass
+# the rate limit.
+next_allowed_call_time = [getruntime() + PAUSE]
+
+def rate_limited_getlocation():
+  lock.acquire(True)
+  while getruntime() < next_allowed_call_time[0]:
+    sleep(next_allowed_call_time[0] - getruntime())
+  next_allowed_call_time[0] = getruntime() + PAUSE
+  lock.release()
+  return get_location()
+
+CHILD_CONTEXT_DEF["get_location"] = {
+    "type": "func",
+    "target": rate_limited_getlocation,
+    "args": None,
+    "exceptions": "any",
+    "return": "any",
+}
+
+secure_dispatch_module()
+
+
+"""
+The implementations below fail with
+
+Exception (with type 'exceptions.UnboundLocalError'): local variable 't' referenced before assignment
+
+Once we dispatch and reach user code, the single int/float variable
+disappears from the "global" (uhm, sec-layer global) scope and isn't
+available to the function then.
+
+l = createlock()
+t = 0
+def XXXrate_limited_getlocation():
+  l.acquire(True)
+  while getruntime() < t:
+    sleep(t - getruntime())
+  t = getruntime() + PAUSE
+  l.release()
+  return get_location()
+
+
+# Same for the closure'd version btw!
+def YYYrate_limited_getlocation():
+  l = createlock()
+  t = 0
+  def rate_limited_getlocation():
+    l.acquire(True)
+    while getruntime() < t:
+      sleep(t - getruntime())
+    t = getruntime() + PAUSE
+    l.release()
+    return get_location()
+  return rate_limited_getlocation
+"""
+

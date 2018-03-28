@@ -1,0 +1,109 @@
+"""
+shakeme.r2py -- a simple accelerometer and text-to-speech "game"
+
+This little program reads the accelerometer, calculates a moving average
+of the absolute magnitude of the acceleration (minus standard gravity),
+and informs the user whether it feels "bored" and wants to be shaken,
+has "fun", or thinks the acceleration is too agitated for its taste.
+
+For calibration purposes, the averaged acceleration is logged to the
+vessel log.
+"""
+
+# Average over this many accelerometer readings
+WINDOW_LENGTH = 500
+
+# The accelerometer's z axis reports approximatel -G with the device
+# at rest and the screen pointing upwards. Adjust for this!
+G = 9.81
+
+# Below this, I'll think I'm at rest.
+RESTING_THRESHOLD = 1
+
+# Above this, I'll think I'm being shook too violently.
+SHAKING_THRESHOLD = 5
+
+# These are global variables for the current agitation level and "feeling",
+# used for communication between our three threads
+mycontext["action"] = "resting"
+mycontext["state"] = "bored"
+
+
+
+def classify_acceleration():
+  """Read the accelerometer, average over a window, and set the global
+  state according to the thresholds.
+  (This function will be started in a thread of its own.)"""
+  # Initialize the averaging window to zero
+  averaging_window = [0.0] * WINDOW_LENGTH
+
+  i = 0
+  while True:
+    # Log the average acceleration every WINDOW_LENGTH passes through the loop.
+    # Use this to calibrate your shaking motion and the device's sensors.
+    i = (i + 1) % WINDOW_LENGTH
+    if not i:
+      log(getruntime(), average_acceleration, "\n")
+
+    # Drop the oldest (left-most) item from the window
+    averaging_window.pop(0)
+
+    # Get a new reading and calculate the absolute vector magnitude,
+    # minus standard gravity.
+    # (On my Nexus 6, a typical acceleration reading will be
+    # [some_timestamp, -0.05622125, -0.02064515, 9.857223575], yielding
+    # an absolute magnitude of around 0.05).
+    t, x, y, z = get_acceleration()
+    averaging_window.append(abs((x**2 + y**2 + z**2)**0.5 - G))
+
+    # Average the acceleration over the window
+    average_acceleration = sum(averaging_window) / WINDOW_LENGTH
+
+    # Depending on the average acceleration, set the current action
+    if average_acceleration < RESTING_THRESHOLD:
+      mycontext["action"] = "resting"
+    elif average_acceleration > SHAKING_THRESHOLD:
+      mycontext["action"] = "shaking"
+    else:
+      mycontext["action"] = "moving"
+
+
+
+def speak_state():
+  """Use the text-to-speech interface to inform the user of
+  the current state.
+  Note: This function will be started in a thread of its own."""
+  while True:
+    # Sleep for a somewhat-random 0-10 seconds
+    sleep(10 * (getruntime() % 1))
+    if mycontext["state"] == "bored":
+      tts_speak("Now I'm bored.")
+    elif mycontext["state"] == "fun":
+      tts_speak("I am having fun!")
+    elif mycontext["state"] == "too much":
+      tts_speak("Whoa, slow down please.")
+
+
+
+# Start the above two functions in separate threads. Information is
+# passed using global variables.
+createthread(classify_acceleration)
+createthread(speak_state)
+
+
+# Explain the problem to the user
+tts_speak("I'm bored. Please shake me!")
+
+
+# Down here, we set the current state depending on the current action.
+while True:
+  # Update kind-of randomly
+  sleep(5 * (getruntime() % 1))
+
+  if mycontext["action"] == "resting":
+    mycontext["state"] = "bored"
+  elif mycontext["action"] == "moving":
+    mycontext["state"] = "fun"
+  elif mycontext["action"] == "shaking":
+    mycontext["state"] = "too much"
+

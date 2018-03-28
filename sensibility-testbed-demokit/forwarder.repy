@@ -1,0 +1,112 @@
+"""forwarder.repy --- A TCP port forwarder in RepyV1.
+
+A quick proof of concept by Albert Rafetseder on 2015-08-19.
+PUBLIC DOMAIN, use as you wish!
+"""
+
+usage = """
+Usage:
+  python repy.py restrictions forwarder.repy LOCAL_PORT REMOTE_HOST REMOTE_PORT
+
+All arguments are mandatory. Make sure your LOCAL_PORT is in the restrictions 
+file, and the REMOTE_HOST is either an IPv4 address, or resolvable to one.
+"""
+
+"""
+Conceptual note:
+Our forwarder has two socket objects per forwarded connection (obviously):
+One for the client <--> forwarder connection, and one for the connection 
+forwarder <--> server. We set up the latter once the former comes into 
+existence (when a client connects in on our local port).
+"""
+
+# Forward a maximum of this many bytes per send/recv call at once.
+# (We limit this so as to apply back-pressure on flow control. Otherwise, 
+# the various TCPs at play might think we are very fast receivers/senders, 
+# and fill our poor Repy socket buffers very quickly).
+CHUNK_SIZE = 1400
+
+
+def forward_data(in_socket, out_socket):
+  """Helper function that receives data from in_socket, and sends it out 
+  on out_socket. If an exception occurs, it stops forwarding.
+  """
+  while True:
+    try:
+      data = in_socket.recv(CHUNK_SIZE)
+      # Loop over `send`, as it isn't guaranteed to send out the full 
+      # amount of data at once
+      while len(data) > 0:
+        amount_sent = out_socket.send(data)
+        data = data[amount_sent:]
+    except:
+      # If anything goes wrong (e.g. the client connection breaks), 
+      # just stop this half of the forwarding function, and let the 
+      # other half experience the problem when it next tries to 
+      # send/recv.
+      # XXX This delays notification of either side of the forwarded 
+      # XXX connection of the fact that the other half went down.
+      break
+
+
+
+def get_forwarder_to_remote_host(server_ip, server_dest_port):
+  """This function returns a callback function configured to 
+  forward data between a client and the desired server IP and port."""
+
+  def configured_callback_function(client_ip, client_source_port, 
+      client_to_forwarder_socket, thiscommhandle, listencommhandle):
+    """When `waitforconn` calls this function, we have a connection 
+    to our client on whose behalf we will forward data. We open a 
+    connection to the desired server, and then pass data back and forth."""
+    try:
+      forwarder_to_server_socket = openconn(server_ip, server_dest_port)
+    except Exception, e:
+      # We couldn't connect to the server. Complain, then close down our 
+      # connection to the client.
+      print "Error serving client", client_ip, "on port", client_source_port, 
+      print str(e)
+      stopcomm(thiscommhandle)
+      return
+    # Reaching this point means we could connect to the server.
+    # Start forwarding data now!
+    settimer(0, forward_data, (client_to_forwarder_socket, forwarder_to_server_socket))
+    settimer(0, forward_data, (forwarder_to_server_socket, client_to_forwarder_socket))
+
+  # We are back in get_forwarder_to_remote_host's scope. Return the 
+  # callback function we just configured.
+  return configured_callback_function
+
+
+
+# This is the main entry point when our program is started.
+
+if callfunc == "initialize":
+  # Parse the arguments first (or print usage info on errors)
+  try:
+    local_port = int(callargs[0])
+    server_name = callargs[1]
+    # Use whatever IP address is associated with server_name
+    server_ip = gethostbyname_ex(server_name)[2][0]
+    server_dest_port = int(callargs[2])
+  except Exception, e:
+    print "Error:", str(e)
+    print usage
+    exitall()
+
+  # We know our ports and remote host by now.
+  print "Hi, this is your Repy forwarder. I'm listening on",
+  print getmyip(), "port", local_port
+  print "and will forward incoming connections to",
+  print server_ip, "(IP of", server_name, ") port", server_dest_port
+
+  # Get a callback function configured for the desired server IP and port
+  forwarder_callback_for_server = get_forwarder_to_remote_host(server_ip, server_dest_port)
+
+  # Finally, set up a listener for the local port.
+  try:
+    waitforconn(getmyip(), local_port, forwarder_callback_for_server)
+  except Exception, e:
+    print "Error:", str(e)
+    print usage
+

@@ -1,0 +1,19 @@
+dylink_source_file = openfile("dylink.r2py", False)
+dylink_code = dylink_source_file.readat(None, 0)
+dylink_namespace = createvirtualnamespace(dylink_code, "Dylink!")
+results = dylink_namespace.evaluate(_context)
+log(results.keys(), "\n\n")
+_context = results["CHILD_CONTEXT"]
+_context["_context"] = _context
+init_dylink(_context, _context)
+
+for reference in ["dylink_source_file", "dylink_code", "dylink_namespace", ]:
+  """
+    "MAX_FILE_SIZE", "init_dylink", "dylink_import_global", "ImportedModule", 
+    "MODULE_BIND_CACHE", "_dy_module_code", "MODULE_CACHE", "DylinkNamespace", 
+    "STOCK_API", "IMPORTED_MODULE_CACHE", "imports_in_progress", 
+    "get_DylinkNamespace", "SYMBOLS_TO_IGNORE_WHEN_FROM_X_IMPORT", 
+    "_default_context", "_dy_bind_code"]:"""
+  del _context[reference]
+
+log(_context.keys(), "\n\n")

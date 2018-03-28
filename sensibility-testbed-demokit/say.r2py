@@ -1,0 +1,27 @@
+'''
+say.r2py -- echo call arguments using the device's text-to-speech function
+
+This program takes command line arguments (aka "callargs") and uses the
+text-to-speech function to read out these arguments verbally.
+
+Usage:
+user@%1 !> run say.r2py one two three etc
+'''
+
+# Store the words to say in this string.
+sentence = ''
+
+# If no callargs were provided, say so.
+if len(callargs) == 0:
+  sentence = 'You did not provide call arguments.'
+
+
+# Add all the words in the `callargs` list to the sentence.
+# (The list elements are strings already, no need for casting).
+# If there were no callargs, the loop is not entered.
+for word in callargs:
+  sentence += word + ' '
+
+
+# Finally, read the sentence out aloud.
+tts_speak(sentence)

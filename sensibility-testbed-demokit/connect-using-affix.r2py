@@ -1,0 +1,168 @@
+"""
+Listen on a port on localhost, and forward data to a remote machine 
+using a specific (or auto-configured) Affix stack.
+
+Usage:
+  python repy.py restrictionsfile dylink.r2py connect-using-affix.r2py 
+     REMOTE_HOST REMOTE_PORT [ AFFIX_STRING ]
+
+where REMOTE_HOST is the IP address or identifier of the remote host, 
+REMOTE_PORT is the server port on the remote host, and
+AFFIX_STRING is an optional Affix string that should be used to connect. 
+    If omitted, ``(CoordinationAffix)'' will be used as the Affix string.
+"""
+
+affix_stack = dy_import_module("affix_stack.r2py")
+random = dy_import_module("random.r2py")
+
+MAX_BUFFER_LEN = 1400
+
+def forward_data(client_facing_socket, server_facing_socket):
+  # Stolen from tcp_relay.r2py
+  def _forward_data_helper():
+    """
+    <Purpose>
+      The function forwards all the incoming messages from one
+      socket to another (and the other way around). 
+      To be started via createthread.
+
+    <Arguments>
+      client_facing_socket - The socket connected to by the client seeking 
+          to contact the server on whose behalf we are listening.
+      server_facing_socket - The socket between the server and us, created 
+          when the server connected in in response to a CONN_AVAILABLE 
+          message on the control connection.
+
+    <Side Effects>
+      None
+
+    <Exceptions>        
+      None
+
+    <Return>
+      None
+    """
+
+    is_relayed_connection_alive = True
+
+    server_facing_send_buffer = ""
+    client_facing_send_buffer = ""
+
+    while True:
+      # XXX Should we back off if encountering multiple SocketWouldBlockError's in a row?
+      if is_relayed_connection_alive:
+        free_server_buffer_space = MAX_BUFFER_LEN - len(server_facing_send_buffer)
+        if free_server_buffer_space > 0:
+          try:
+            server_facing_send_buffer += client_facing_socket.recv(free_server_buffer_space)
+          except SocketWouldBlockError:
+            pass
+          except (SocketClosedLocal, SocketClosedRemote):
+            is_relayed_connection_alive = False
+            client_facing_send_buffer = ""
+
+      try:
+        bytes_sent = server_facing_socket.send(server_facing_send_buffer)
+        server_facing_send_buffer = server_facing_send_buffer[bytes_sent:]
+      except SocketWouldBlockError:
+        pass
+      except (SocketClosedLocal, SocketClosedRemote):
+        is_relayed_connection_alive = False
+        server_facing_send_buffer = ""
+
+
+      if is_relayed_connection_alive:
+        free_client_buffer_space = MAX_BUFFER_LEN - len(client_facing_send_buffer)
+        if free_client_buffer_space > 0:
+          try:
+            client_facing_send_buffer += server_facing_socket.recv(free_client_buffer_space)
+          except SocketWouldBlockError:
+            pass
+          except (SocketClosedLocal, SocketClosedRemote):
+            is_relayed_connection_alive = False
+            server_facing_send_buffer = ""
+
+      try:
+        bytes_sent = client_facing_socket.send(client_facing_send_buffer)
+        client_facing_send_buffer = client_facing_send_buffer[bytes_sent:]
+      except SocketWouldBlockError:
+        pass
+      except (SocketClosedLocal, SocketClosedRemote):
+        is_relayed_connection_alive = False
+        client_facing_send_buffer = ""
+
+      # If either side has hung up and the data it sent has been forwarded,
+      # close down the remaining connection.
+      if not is_relayed_connection_alive and \
+          len(client_facing_send_buffer) == 0 and \
+          len(server_facing_send_buffer) == 0:
+        try:
+          server_facing_socket.close()
+        except (SocketClosedLocal, SocketClosedRemote):
+          pass
+        try:
+          client_facing_socket.close()
+        except (SocketClosedLocal, SocketClosedRemote):
+          pass
+        break
+
+    log("Connection terminated.\n")
+
+  # Return the helper function.   
+  return _forward_data_helper
+
+
+
+
+remote_host = callargs[0]
+remote_port = int(callargs[1])
+
+try:
+  desired_affix_string = callargs[2]
+except IndexError:
+  desired_affix_string = "(CoordinationAffix)(NamingAndResolverAffix)"
+
+localportlist = list(getresources()[0]["connport"])
+random.random_shuffle(localportlist)
+
+for localport in localportlist:
+  try:
+    localsocket = listenforconnection("127.0.0.1", localport)
+    break
+  except (AlreadyListeningError, DuplicateTupleError):
+    continue
+
+log("Listening on localhost port", localport, "for connection I can forward.\n")
+log("(Stop this program to make it stop listening.)\n")
+
+
+while True:
+  while True:
+    try:
+      local_ip, local_port, client_facing_socket = localsocket.getconnection()
+      log("Incoming connection on localhost!\n")
+    except SocketWouldBlockError:
+      sleep(0.1)
+      continue
+
+    try:
+      log("Setting up Affix stack", desired_affix_string, "... ")
+      my_stack = affix_stack.AffixStack(desired_affix_string)
+      log("Trying to connect to server... ")
+      for localport in localportlist:
+        try:
+          server_facing_socket = my_stack.openconnection(remote_host, remote_port, getmyip(), localport, 5)
+          break
+        except AddressBindingError:
+          continue
+      else:
+         log("Could not find source port.\n")
+         continue
+      log("Connected to server using", repr(server_facing_socket), "\n")
+    except Exception, e:
+      log("Error connecting to", remote_host, remote_port, "--", repr(e), "\n")
+      raise
+
+    # If we end up here, we have client and server facing sockets 
+    # and can thus start forwarding.
+    createthread(forward_data(client_facing_socket, server_facing_socket)) 

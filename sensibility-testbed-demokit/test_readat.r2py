@@ -1,0 +1,55 @@
+"""
+Test the RepyV2 file read API for consistency with its docs.
+"""
+
+FILENAME = "testdata"
+SIZE = 10**5
+
+# Make sure to create the test data file anew. (No problem if it doesn't
+# exist yet.)
+try:
+  removefile(FILENAME)
+except FileNotFoundError:
+  pass
+
+
+# Create and populate the test file
+f = openfile(FILENAME, True)
+f.writeat("a"*SIZE, 0)
+
+
+# Go ahead with testing the API now
+assert f.readat(0, 0) == "", "Reading nothing did not return an empty string"
+
+try:
+  f.readat(0, 10*SIZE)
+except SeekPastEndOfFileError:
+  # Seeing this error means Repy correctly detected that we are reading
+  # past the end of the file. Let's keep going!
+  pass
+
+
+assert len(f.readat(10*SIZE, 0)) == SIZE, "Could read more bytes than the file contains"
+
+assert len(f.readat(None, 0)) == SIZE, "Unlimited readat didn't read whole file"
+
+
+# Test combinations of sizelimit and offset.
+# sizelimit must be a non-negative int or None.
+# offset must be a non-negative int.
+test_values = [0, None, -SIZE, SIZE/2, -SIZE/2]
+for sizelimit in test_values:
+  for offset in test_values:
+    try:
+      f.readat(sizelimit, offset)
+    except RepyArgumentError, e:
+      log("ERROR", repr(e), "for sizelimit", sizelimit, "offset", offset, "\n")
+    else:
+      log("No problem for sizelimit", sizelimit, "offset", offset, "\n")
+
+
+f.close()
+
+# Clean up after ourselves
+removefile(FILENAME)
+

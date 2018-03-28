@@ -1,0 +1,124 @@
+"""
+proquint.r2py --- a library to encode/decode hex into/from Proquint,
+    http://arxiv.org/html/0901.4016
+
+Proquint is an encoding for hexadecimal numbers, transforming 16-bit hex 
+words into human-PROnouncible QUINTuplets of consonants and vowels.
+
+Hex numbers are grouped as 16-bit words, to be encoded such that 
+
+bit no. 0 1 2 3 4 5 6 7 8 9 A B C D E F
+       +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+       |con    |vo |con    |vo |con    |
+       +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+i.e. the first four bits map into a consonant, the next two into a 
+vowel, and so on. Multiple encodings of 16-bit words are separated by 
+dashes, ``CVCVC-CVCVC-....''
+
+The consonant mapping used is
+  0 1 2 3 4 5 6 7 8 9 A B C D E F
+  b d f g h j k l m n p r s t v z
+
+The vowel mapping used is
+  0 1 2 3
+  a i o u
+
+
+Things the original spec does not mention:
+
+Padding --- I will pad with additional zero nibbles ``on the left'' (i.e. 
+  before the most-significant nibble) any hexadecimal numbers that aren't 
+  multiples of four hex-digits wide. Paddings / leading zeros are 
+  suppressed for numeric output.
+  Note that this leaves numbers with leading zeros with infinitely many 
+  possible encodings (0x..., 0x0..., 0x00..., 0x000..., etc.)
+
+Negative numbers --- I will not encode negative numbers.
+"""
+
+# Encoding mappings from nibbles / two-bits to consonants / vowels
+nibble_to_consonant = {
+    0: "b", 1: "d", 2: "f", 3: "g", 4: "h", 5: "j", 6: "k", 7: "l",
+    8: "m", 9: "n", 10: "p", 11: "r", 12: "s", 13: "t", 14: "v", 15: "z"}
+
+twobits_to_vowel = {0: "a", 1: "i", 2: "o", 3: "u"}
+
+
+# Decoding mappings we generate programmatically from the encodings
+consonant_to_nibble = {}
+for nibble, consonant in nibble_to_consonant.items():
+  consonant_to_nibble[consonant] = nibble
+
+vowel_to_twobits = {}
+for twobits, vowel in twobits_to_vowel.items():
+  vowel_to_twobits[vowel] = twobits
+
+
+
+def encode(hexthing):
+  if type(hexthing) is str:
+    if not hexthing.startswith("0x"):
+      raise RepyArgumentError("str argument must start with '0x', and "
+          "must not be negative")
+    hexnum = int(hexthing, 16)
+  elif type(hexthing) in (int, long):
+    if hexthing < 0:
+      raise RepyArgumentError("Cannot encode negative numbers")
+    hexnum = hexthing
+  else:
+    raise RepyArgumentError("Argument must be of type str, int, or long, not " + type(hexstring))
+
+  proquint_elements = []
+  while True:
+    next_proquint = (nibble_to_consonant[(hexnum & 0xf000) >> 12] +
+        twobits_to_vowel[(hexnum & 0x0c00) >> 10] + 
+        nibble_to_consonant[(hexnum & 0x03c0) >> 6] + 
+        twobits_to_vowel[(hexnum & 0x0030) >> 4] +
+        nibble_to_consonant[hexnum & 0x000f])
+    proquint_elements.insert(0, next_proquint)
+    hexnum >>= 16
+    if hexnum <= 0:
+      break
+
+  return "-".join(proquint_elements)
+
+
+
+def decode(string):
+  # We understand single Proquint "words" of five letters (representing 
+  # 16 bit), or concatenated, dash-separated words, making the allowed 
+  # string length 5 (mod 6).
+  if len(string) % 6 != 5:
+    raise RepyArgumentError("Unexpected Proquint string length " + str(len(string)))
+
+  # Check beforehand that the string contains only characters we can decode.
+  # (They might show up in the wrong place though, e.g. "axaxa" or "-----"
+  for char in string:
+    if char not in consonant_to_nibble.keys() + vowel_to_twobits.keys() + ["-"]:
+      raise RepyArgumentError("String argument contains non-Proquint char '" + 
+          char + "'")
+
+  decoded_int_elements = []
+  while string != "":
+    a, b, c, d, e = string[:5]
+    try:
+      next_int = ((consonant_to_nibble[a] << 12) + 
+          (vowel_to_twobits[b] << 10) + 
+          (consonant_to_nibble[c] << 6) + 
+          (vowel_to_twobits[d] << 4) + 
+          consonant_to_nibble[e])
+    except KeyError:
+      raise RepyArgumentError("Quintuple '" + a + b + c + d + e + 
+          "' contained a character that was not decodeable in its position")
+    decoded_int_elements.append(next_int)
+    # Skip ahead. Note that the word-separating char could be anything.
+    # (We don't check.)
+    string = string[6:]
+
+  decoded_int = 0
+  for int_element in decoded_int_elements:
+    decoded_int = (decoded_int << 16) + int_element
+
+  return decoded_int
+
